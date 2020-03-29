@@ -16,15 +16,14 @@ impl<'a> RenderContext<'a> {
     }
 
     fn draw_indexed_triangles(&mut self, indices: &[usize], vertices: &[glm::Vec3]) {
-        match indices {
-            [i1, i2, i3, rest @ ..] => {
-                let p1 = &vertices[*i1];
-                let p2 = &vertices[*i2];
-                let p3 = &vertices[*i3];
-                self.draw_triangle(p1, p2, p3);
-                self.draw_indexed_triangles(rest, vertices);
+        let mut current_indices = indices;
+        loop {
+            if let [i1, i2, i3, rest @ ..] = current_indices {
+                self.draw_triangle(&vertices[*i1], &vertices[*i2], &vertices[*i3]);
+                current_indices = rest;
+            } else {
+                break;
             }
-            _ => {}
         }
     }
     
