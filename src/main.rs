@@ -21,7 +21,10 @@ impl<'a> RenderContext<'a> {
         let mut current_indices = indices;
         loop {
             if let [i1, i2, i3, rest @ ..] = current_indices {
-                self.draw_triangle(&vertices[*i1], &vertices[*i2], &vertices[*i3]);
+                let v1 = self.transform_to_window_coordinates(&vertices[*i1]);
+                let v2 = self.transform_to_window_coordinates(&vertices[*i2]);
+                let v3 = self.transform_to_window_coordinates(&vertices[*i3]);
+                self.draw_triangle(&v1, &v2, &v3);
                 current_indices = rest;
             } else {
                 break;
@@ -29,16 +32,90 @@ impl<'a> RenderContext<'a> {
         }
     }
     
-    fn draw_triangle(&mut self, p1: &glm::Vec3, p2: &glm::Vec3, p3: &glm::Vec3) {
+    fn draw_triangle(&mut self, v1: &glm::Vec3, v2: &glm::Vec3, v3: &glm::Vec3) {
+        let mut v1 = v1;
+        let mut v2 = v2;
+        let mut v3 = v3;
+
+        if v2.y < v1.y {
+            std::mem::swap(&mut v1, &mut v2);
+        }
+        if v3.y < v2.y {
+            std::mem::swap(&mut v2, &mut v3);
+        }
+        if v2.y < v1.y {
+            std::mem::swap(&mut v1, &mut v2);
+        }
+
+        //natural flat top
+        if v1.y == v2.y { 
+            if v2.x < v1.x {
+                std::mem::swap(&mut v1, &mut v2);
+            }
+            self.draw_flat_top_triangle(v1, v2, v3);
+        }
+        //natural flat bottom
+        else if v2.y == v3.y {
+            if v3.x < v2.x {
+                std::mem::swap(&mut v2, &mut v3);
+            }
+            self.draw_flat_bottom_triangle(v1, v2, v3);
+        }
+        //general triangle
+        else {
+            let alpha = (v2.y - v1.y) / (v3.y - v1.y);
+            let vi = v1 + (v3 - v1) * alpha;
+            //major right
+            if v2.x < vi.x {
+                self.draw_flat_bottom_triangle(v1, v2, &vi);
+                self.draw_flat_top_triangle(v2, &vi, v3);
+            }
+            //major left
+            else {
+                self.draw_flat_bottom_triangle(v1, &vi, v2);
+                self.draw_flat_top_triangle(&vi, v2, v3);
+            }
+        }
+    }
+
+    fn draw_flat_top_triangle(&mut self, v1: &glm::Vec3, v2: &glm::Vec3, v3: &glm::Vec3) {
+        let slope1 = (v3.x - v1.x) / (v3.y - v1.y);
+        let slope2 = (v3.x - v2.x) / (v3.y - v2.y);
+
+        let y_start = (v1.y - 0.5).ceil() as i32;
+        let y_end = (v3.y - 0.5).ceil() as i32;
+        
+        for y in y_start..y_end {
+            let x_start = (slope1 * (y as f32 + 0.5 - v1.y) + v1.x - 0.5).ceil() as i32;
+            let x_end = (slope2 * (y as f32 + 0.5 - v2.y) + v2.x - 0.5).ceil() as i32;
+            for x in x_start..x_end {
+                self.pixel_shader((x, y));
+            }
+        }
+    }
+
+    fn draw_flat_bottom_triangle(&mut self, v1: &glm::Vec3, v2: &glm::Vec3, v3: &glm::Vec3) {
+        let slope1 = (v2.x - v1.x) / (v2.y - v1.y);
+        let slope2 = (v3.x - v1.x) / (v3.y - v1.y);
+        
+        let y_start = (v1.y - 0.5).ceil() as i32;
+        let y_end = (v3.y - 0.5).ceil() as i32;
+        
+        for y in y_start..y_end {
+            let x_start = (slope1 * (y as f32 + 0.5 - v1.y) + v1.x - 0.5).ceil() as i32;
+            let x_end = (slope2 * (y as f32 + 0.5 - v1.y) + v1.x - 0.5).ceil() as i32;
+            for x in x_start..x_end {
+                self.pixel_shader((x, y));
+            }
+        }
+    }
+
+    fn pixel_shader(&mut self, point: (i32, i32)) {
         let window_size = self.canvas.output_size().unwrap();
-        let points = vec![p1, p2, p3, p1].
-            iter().map(|p| {
-                sdl2::rect::Point::new(
-                ((p.x + 1.0) * (window_size.0 as f32 / 2.0)) as i32,
-                ((p.y + 1.0) * (window_size.1 as f32 / 2.0)) as i32
-                )
-            }).collect::<Vec<_>>();
-        self.canvas.draw_lines(&*points).unwrap();
+        let window_size = (window_size.0 as i32, window_size.1 as i32);
+        if point.0 >= 0 && point.0 < window_size.0 && point.1 >= 0 && point.1 < window_size.1 {
+            self.canvas.draw_point(point).unwrap();
+        }
     }
 
     fn transform_vertices(vertices: &mut [glm::Vec3], mvp: &glm::Mat4) {
@@ -46,6 +123,15 @@ impl<'a> RenderContext<'a> {
             let v_temp = mvp * glm::vec4(v.x, v.y, v.z, 1.0);
             *v = v_temp.xyz() / v_temp.w;
         }
+    }
+
+    fn transform_to_window_coordinates(&self, v: &glm::Vec3) -> glm::Vec3 {
+        let window_size = self.canvas.output_size().unwrap();
+        glm::vec3(
+            (v.x + 1.0) * (window_size.0 as f32 / 2.0),
+            (v.y + 1.0) * (window_size.1 as f32 / 2.0),
+            v.z
+        )
     }
 
     fn mvp() -> glm::Mat4 {
