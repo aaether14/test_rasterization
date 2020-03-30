@@ -16,6 +16,8 @@ impl<'a> RenderContext<'a> {
     }
 
     fn draw_indexed_triangles(&mut self, indices: &[usize], vertices: &[glm::Vec3]) {
+        let mut vertices = vertices.to_vec();
+        Self::transform_vertices(&mut *vertices, &Self::mvp());
         let mut current_indices = indices;
         loop {
             if let [i1, i2, i3, rest @ ..] = current_indices {
@@ -28,22 +30,6 @@ impl<'a> RenderContext<'a> {
     }
     
     fn draw_triangle(&mut self, p1: &glm::Vec3, p2: &glm::Vec3, p3: &glm::Vec3) {
-        let rotation = glm::rotation(std::f32::consts::PI / 4.0,
-             &glm::vec3(0.0, 1.0, 0.0));
-        let translation = glm::translation(&glm::vec3(0.0, 0.0, 5.0));
-        let model = translation * rotation;
-        let perspective = glm::perspective(
-            4.0 / 3.0, 
-            std::f32::consts::PI / 4.0,
-            0.1,
-            100.0
-        );
-        let mut p1 = (perspective * model) * glm::vec4(p1.x, p1.y, p1.z, 1.0);
-        let mut p2 = (perspective * model) * glm::vec4(p2.x, p2.y, p2.z, 1.0);
-        let mut p3 = (perspective * model) * glm::vec4(p3.x, p3.y, p3.z, 1.0);
-        p1 /= p1.w;
-        p2 /= p2.w;
-        p3 /= p3.w;
         let window_size = self.canvas.output_size().unwrap();
         let points = vec![p1, p2, p3, p1].
             iter().map(|p| {
@@ -53,6 +39,27 @@ impl<'a> RenderContext<'a> {
                 )
             }).collect::<Vec<_>>();
         self.canvas.draw_lines(&*points).unwrap();
+    }
+
+    fn transform_vertices(vertices: &mut [glm::Vec3], mvp: &glm::Mat4) {
+        for v in vertices {
+            let v_temp = mvp * glm::vec4(v.x, v.y, v.z, 1.0);
+            *v = v_temp.xyz() / v_temp.w;
+        }
+    }
+
+    fn mvp() -> glm::Mat4 {
+        let rotation = glm::rotation(std::f32::consts::PI / 4.0,
+            &glm::vec3(0.0, 1.0, 0.0));
+       let translation = glm::translation(&glm::vec3(0.0, 0.0, 5.0));
+       let model = translation * rotation;
+       let perspective = glm::perspective(
+           4.0 / 3.0, 
+           std::f32::consts::PI / 4.0,
+           0.1,
+           100.0
+       );
+       perspective * model
     }
 
 }
