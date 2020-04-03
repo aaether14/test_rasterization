@@ -1,17 +1,72 @@
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::render::WindowCanvas;
 
 extern crate nalgebra_glm as glm;
  
+struct FpsCounter {
+    last_time: std::time::Instant,
+    counter: u32
+}
+
+impl FpsCounter {
+    fn new() -> Self {
+        FpsCounter {
+            last_time: std::time::Instant::now(),
+            counter: 0
+        }
+    }
+
+    fn update(&mut self) -> Option<u32> {
+        self.counter += 1;
+        match self.last_time.elapsed().as_millis() {
+            s if s >= 1000 => {
+                let counter = self.counter;
+                self.counter = 0;
+                self.last_time = std::time::Instant::now();
+                Some(counter)
+            },
+            _ => None
+        }
+    }
+}
+
+struct TextureBuffer {
+    buffer: Vec<u8>,
+    size: (u32, u32),
+    bytes_per_pixel: u32
+}
+
+impl TextureBuffer {
+    fn new(size: (u32, u32), bytes_per_pixel: u32) -> Self {
+        TextureBuffer {
+            buffer: vec![0; (size.0 * size.1 * bytes_per_pixel) as usize],
+            size: size,
+            bytes_per_pixel: bytes_per_pixel
+        }
+    }
+
+    fn pitch(&self) -> usize {
+        (self.size.0 * self.bytes_per_pixel) as usize
+    }
+
+    fn set(&mut self, point: (u32, u32), color: [u8; 3]) {
+        let index = (self.bytes_per_pixel * (point.1 * self.size.0 + point.0)) as usize;
+        unsafe {
+            std::ptr::copy_nonoverlapping(&color as *const u8,
+                self.buffer.as_mut_ptr().offset(index as isize),
+                std::mem::size_of_val(&color));
+        }
+    }
+}
+
 struct RenderContext<'a> {
-    canvas: &'a mut WindowCanvas
+    texture_buffer: &'a mut TextureBuffer
 }
 
 impl<'a> RenderContext<'a> {
-    fn new(canvas: &'a mut WindowCanvas) -> Self {
+    fn new(texture_buffer: &'a mut TextureBuffer) -> Self {
         RenderContext {
-            canvas: canvas
+            texture_buffer: texture_buffer
         }
     }
 
@@ -111,10 +166,11 @@ impl<'a> RenderContext<'a> {
     }
 
     fn pixel_shader(&mut self, point: (i32, i32)) {
-        let window_size = self.canvas.output_size().unwrap();
-        let window_size = (window_size.0 as i32, window_size.1 as i32);
-        if point.0 >= 0 && point.0 < window_size.0 && point.1 >= 0 && point.1 < window_size.1 {
-            self.canvas.draw_point(point).unwrap();
+        if point.0 >= 0 && point.1 >= 0 {
+            let point = (point.0 as u32, point.1 as u32);
+            if point.0 < self.texture_buffer.size.0 && point.1 < self.texture_buffer.size.1 {
+                self.texture_buffer.set(point, [255, 0, 255]);
+            }
         }
     }
 
@@ -126,10 +182,9 @@ impl<'a> RenderContext<'a> {
     }
 
     fn transform_to_window_coordinates(&self, v: &glm::Vec3) -> glm::Vec3 {
-        let window_size = self.canvas.output_size().unwrap();
         glm::vec3(
-            (v.x + 1.0) * (window_size.0 as f32 / 2.0),
-            (v.y + 1.0) * (window_size.1 as f32 / 2.0),
+            (v.x + 1.0) * (self.texture_buffer.size.0 as f32 / 2.0),
+            (v.y + 1.0) * (self.texture_buffer.size.1 as f32 / 2.0),
             v.z
         )
     }
@@ -158,6 +213,9 @@ pub fn main() {
         .position_centered()
         .build()
         .unwrap();
+
+    let window_size = window.size();
+    let mut texture_buffer = TextureBuffer::new(window_size, 4);
  
     let mut canvas = window.into_canvas().build().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
@@ -203,9 +261,11 @@ pub fn main() {
         20, 21, 22, 20, 22, 23 as usize 
     ];
 
+    let mut fps_counter = FpsCounter::new();
+
     'running: loop {
         for event in event_pump.poll_iter() {
-            match event {
+            match event {   
                 Event::Quit {..} |
                 Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'running
@@ -214,11 +274,23 @@ pub fn main() {
             }
         }
 
-        canvas.set_draw_color((255, 0, 0));
-
-        let mut render_context = RenderContext::new(&mut canvas);
+        let mut render_context = RenderContext::new(&mut texture_buffer);
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
 
+        let texture_creator = canvas.texture_creator();
+        let mut texture = texture_creator
+            .create_texture_target(texture_creator.default_pixel_format(),
+                 window_size.0,
+                 window_size.1)
+            .unwrap();
+        texture.update(None, &texture_buffer.buffer, 
+            texture_buffer.pitch()).unwrap();
+
+        canvas.copy(&texture, None, None).unwrap();
         canvas.present();
+
+        if let Some(fps) = fps_counter.update() {
+            println!("Fps: {}", fps);
+        }
     }
 }
