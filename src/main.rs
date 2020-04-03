@@ -49,30 +49,56 @@ impl TextureBuffer {
         (self.size.0 * self.bytes_per_pixel) as usize
     }
 
-    fn set(&mut self, point: (u32, u32), color: [u8; 3]) {
+    fn set(&mut self, point: (u32, u32), color: &[u8; 3]) {
         let index = (self.bytes_per_pixel * (point.1 * self.size.0 + point.0)) as usize;
         unsafe {
-            std::ptr::copy_nonoverlapping(&color as *const u8,
+            std::ptr::copy_nonoverlapping(color as *const u8,
                 self.buffer.as_mut_ptr().offset(index as isize),
                 std::mem::size_of_val(&color));
+        }
+    }
+
+    fn clear(&mut self, value: u8) {
+        for v in &mut self.buffer {
+            *v = value;
+        }
+    }
+}
+
+struct Camera {
+    view: glm::Mat4,
+    projection: glm::Mat4
+}
+
+impl Camera {
+    fn new(aspect: f32, fovy: f32, near: f32, far: f32) -> Self {
+        Camera {
+            view: glm::identity(),
+            projection: glm::perspective(aspect, fovy, near, far)
         }
     }
 }
 
 struct RenderContext<'a> {
-    texture_buffer: &'a mut TextureBuffer
+    draw_buffer: &'a mut TextureBuffer,
+    camera: &'a Camera,
+    model: &'a glm::Mat4
 }
 
 impl<'a> RenderContext<'a> {
-    fn new(texture_buffer: &'a mut TextureBuffer) -> Self {
+    fn new(draw_buffer: &'a mut TextureBuffer, camera: &'a Camera, model: &'a glm::Mat4) -> Self {
         RenderContext {
-            texture_buffer: texture_buffer
+            draw_buffer: draw_buffer,
+            camera: camera,
+            model: model
         }
     }
 
     fn draw_indexed_triangles(&mut self, indices: &[usize], vertices: &[glm::Vec3]) {
         let mut vertices = vertices.to_vec();
-        Self::transform_vertices(&mut *vertices, &Self::mvp());
+        let mvp = self.camera.projection * 
+            self.camera.view * self.model;
+        Self::transform_vertices(&mut *vertices, &mvp);
         let mut current_indices = indices;
         loop {
             if let [i1, i2, i3, rest @ ..] = current_indices {
@@ -168,8 +194,8 @@ impl<'a> RenderContext<'a> {
     fn pixel_shader(&mut self, point: (i32, i32)) {
         if point.0 >= 0 && point.1 >= 0 {
             let point = (point.0 as u32, point.1 as u32);
-            if point.0 < self.texture_buffer.size.0 && point.1 < self.texture_buffer.size.1 {
-                self.texture_buffer.set(point, [255, 0, 255]);
+            if point.0 < self.draw_buffer.size.0 && point.1 < self.draw_buffer.size.1 {
+                self.draw_buffer.set(point, &[255, 255, 255]);
             }
         }
     }
@@ -183,24 +209,10 @@ impl<'a> RenderContext<'a> {
 
     fn transform_to_window_coordinates(&self, v: &glm::Vec3) -> glm::Vec3 {
         glm::vec3(
-            (v.x + 1.0) * (self.texture_buffer.size.0 as f32 / 2.0),
-            (v.y + 1.0) * (self.texture_buffer.size.1 as f32 / 2.0),
+            (v.x + 1.0) * (self.draw_buffer.size.0 as f32 / 2.0),
+            (v.y + 1.0) * (self.draw_buffer.size.1 as f32 / 2.0),
             v.z
         )
-    }
-
-    fn mvp() -> glm::Mat4 {
-        let rotation = glm::rotation(std::f32::consts::PI / 4.0,
-            &glm::vec3(0.0, 1.0, 0.0));
-       let translation = glm::translation(&glm::vec3(0.0, 0.0, 5.0));
-       let model = translation * rotation;
-       let perspective = glm::perspective(
-           4.0 / 3.0, 
-           std::f32::consts::PI / 4.0,
-           0.1,
-           100.0
-       );
-       perspective * model
     }
 
 }
@@ -216,6 +228,14 @@ pub fn main() {
 
     let window_size = window.size();
     let mut texture_buffer = TextureBuffer::new(window_size, 4);
+    
+    let mut angle = 0.0;
+    let camera = Camera::new(
+        window_size.0 as f32 / window_size.1 as f32,
+        std::f32::consts::PI / 4.0,
+        0.1,
+        100.0
+    );
  
     let mut canvas = window.into_canvas().build().unwrap();
     let mut event_pump = sdl_context.event_pump().unwrap();
@@ -274,7 +294,16 @@ pub fn main() {
             }
         }
 
-        let mut render_context = RenderContext::new(&mut texture_buffer);
+        texture_buffer.clear(0);
+
+        angle += 0.001;
+        let model = glm::translation(&glm::vec3(0.0, 0.0, 5.0)) * 
+            glm::rotation(angle, &glm::vec3(0.0, 1.0, 0.0));
+        let mut render_context = RenderContext::new(
+            &mut texture_buffer, 
+            &camera,
+            &model
+        );
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
 
         let texture_creator = canvas.texture_creator();
