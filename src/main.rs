@@ -1,8 +1,9 @@
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use std::marker::PhantomData;
 
 extern crate nalgebra_glm as glm;
- 
+
 struct FpsCounter {
     last_time: std::time::Instant,
     counter: u32
@@ -34,7 +35,7 @@ struct TextureBuffer {
     buffer: Vec<u8>,
     size: (u32, u32),
     bytes_per_pixel: u32
-}
+}   
 
 impl TextureBuffer {
     fn new(size: (u32, u32), bytes_per_pixel: u32) -> Self {
@@ -52,9 +53,9 @@ impl TextureBuffer {
     fn set(&mut self, point: (u32, u32), color: &[u8; 3]) {
         let index = (self.bytes_per_pixel * (point.1 * self.size.0 + point.0)) as usize;
         unsafe {
-            std::ptr::copy_nonoverlapping(color as *const u8,
+            std::ptr::copy_nonoverlapping(color.as_ptr(),
                 self.buffer.as_mut_ptr().offset(index as isize),
-                std::mem::size_of_val(&color));
+                std::mem::size_of_val(color));
         }
     }
 
@@ -79,32 +80,48 @@ impl Camera {
     }
 }
 
-struct RenderContext<'a> {
-    draw_buffer: &'a mut TextureBuffer,
-    camera: &'a Camera,
-    model: &'a glm::Mat4
+#[derive(Clone)]
+struct Vertex {
+    position: glm::Vec3
 }
 
-impl<'a> RenderContext<'a> {
-    fn new(draw_buffer: &'a mut TextureBuffer, camera: &'a Camera, model: &'a glm::Mat4) -> Self {
+impl HasPosition for Vertex {
+    fn position(&self) -> &glm::Vec3 {
+        &self.position
+    }
+}
+
+trait HasPosition {
+    fn position(&self) -> &glm::Vec3;
+}
+
+struct RenderContext<'a, V: Clone + HasPosition, VS: Fn(&mut V) -> glm::Vec4> {        
+    draw_buffer: &'a mut TextureBuffer,
+    vertex_shader: VS,
+    phantom: PhantomData<V>
+}
+
+impl<'a, V: Clone + HasPosition, VS: Fn(&mut V) -> glm::Vec4> RenderContext<'a, V, VS> {
+    fn new(draw_buffer: &'a mut TextureBuffer, vertex_shader: VS) -> Self {
         RenderContext {
             draw_buffer: draw_buffer,
-            camera: camera,
-            model: model
+            vertex_shader,
+            phantom: PhantomData
         }
     }
 
-    fn draw_indexed_triangles(&mut self, indices: &[usize], vertices: &[glm::Vec3]) {
+    fn draw_indexed_triangles(&mut self, indices: &[usize], vertices: &[V]) {
         let mut vertices = vertices.to_vec();
-        let mvp = self.camera.projection * 
-            self.camera.view * self.model;
-        Self::transform_vertices(&mut *vertices, &mvp);
+        let positions = vertices.
+            iter_mut().
+            map(&self.vertex_shader).
+            collect::<Vec<_>>();
         let mut current_indices = indices;
         loop {
             if let [i1, i2, i3, rest @ ..] = current_indices {
-                let v1 = self.transform_to_window_coordinates(&vertices[*i1]);
-                let v2 = self.transform_to_window_coordinates(&vertices[*i2]);
-                let v3 = self.transform_to_window_coordinates(&vertices[*i3]);
+                let v1 = self.transform_to_window_coordinates(&positions[*i1].xyz());
+                let v2 = self.transform_to_window_coordinates(&positions[*i2].xyz());
+                let v3 = self.transform_to_window_coordinates(&positions[*i3].xyz());
                 self.draw_triangle(&v1, &v2, &v3);
                 current_indices = rest;
             } else {
@@ -200,13 +217,6 @@ impl<'a> RenderContext<'a> {
         }
     }
 
-    fn transform_vertices(vertices: &mut [glm::Vec3], mvp: &glm::Mat4) {
-        for v in vertices {
-            let v_temp = mvp * glm::vec4(v.x, v.y, v.z, 1.0);
-            *v = v_temp.xyz() / v_temp.w;
-        }
-    }
-
     fn transform_to_window_coordinates(&self, v: &glm::Vec3) -> glm::Vec3 {
         glm::vec3(
             (v.x + 1.0) * (self.draw_buffer.size.0 as f32 / 2.0),
@@ -241,35 +251,35 @@ pub fn main() {
     let mut event_pump = sdl_context.event_pump().unwrap();
 
     let cube_vertices = [
-        glm::vec3(-1.0, -1.0, 1.0),
-        glm::vec3( 1.0, -1.0, 1.0),
-        glm::vec3( 1.0,  1.0, 1.0),
-        glm::vec3(-1.0,  1.0, 1.0),
+        Vertex { position: glm::vec3(-1.0, -1.0, 1.0) },
+        Vertex { position: glm::vec3( 1.0, -1.0, 1.0) },
+        Vertex { position: glm::vec3( 1.0,  1.0, 1.0) },
+        Vertex { position: glm::vec3(-1.0,  1.0, 1.0) },
         
-        glm::vec3(1.0,  1.0,  1.0),
-        glm::vec3(1.0,  1.0, -1.0),
-        glm::vec3(1.0, -1.0, -1.0),
-        glm::vec3(1.0, -1.0,  1.0),
+        Vertex { position: glm::vec3(1.0,  1.0,  1.0) },
+        Vertex { position: glm::vec3(1.0,  1.0, -1.0) },
+        Vertex { position: glm::vec3(1.0, -1.0, -1.0) },
+        Vertex { position: glm::vec3(1.0, -1.0,  1.0) },
     
-        glm::vec3(-1.0, -1.0, -1.0),
-        glm::vec3( 1.0, -1.0, -1.0),
-        glm::vec3( 1.0,  1.0, -1.0),
-        glm::vec3(-1.0,  1.0, -1.0),
+        Vertex { position: glm::vec3(-1.0, -1.0, -1.0) },
+        Vertex { position: glm::vec3( 1.0, -1.0, -1.0) },
+        Vertex { position: glm::vec3( 1.0,  1.0, -1.0) },
+        Vertex { position: glm::vec3(-1.0,  1.0, -1.0) },
     
-        glm::vec3(-1.0, -1.0, -1.0),
-        glm::vec3(-1.0, -1.0,  1.0),
-        glm::vec3(-1.0,  1.0,  1.0),
-        glm::vec3(-1.0,  1.0, -1.0),
+        Vertex { position: glm::vec3(-1.0, -1.0, -1.0) },
+        Vertex { position: glm::vec3(-1.0, -1.0,  1.0) },
+        Vertex { position: glm::vec3(-1.0,  1.0,  1.0) },
+        Vertex { position: glm::vec3(-1.0,  1.0, -1.0) },
     
-        glm::vec3( 1.0, 1.0,  1.0),
-        glm::vec3(-1.0, 1.0,  1.0),
-        glm::vec3(-1.0, 1.0, -1.0),
-        glm::vec3( 1.0, 1.0, -1.0),
+        Vertex { position: glm::vec3( 1.0, 1.0,  1.0) },
+        Vertex { position: glm::vec3(-1.0, 1.0,  1.0) },
+        Vertex { position: glm::vec3(-1.0, 1.0, -1.0) },
+        Vertex { position: glm::vec3( 1.0, 1.0, -1.0) },
         
-        glm::vec3(-1.0, -1.0, -1.0),
-        glm::vec3( 1.0, -1.0, -1.0),
-        glm::vec3( 1.0, -1.0,  1.0),
-        glm::vec3(-1.0, -1.0,  1.0)
+        Vertex { position: glm::vec3(-1.0, -1.0, -1.0) },
+        Vertex { position: glm::vec3( 1.0, -1.0, -1.0) },
+        Vertex { position: glm::vec3( 1.0, -1.0,  1.0) },
+        Vertex { position: glm::vec3(-1.0, -1.0,  1.0) }
     ];
 
     let cube_indices = [
@@ -296,13 +306,17 @@ pub fn main() {
 
         texture_buffer.clear(0);
 
-        angle += 0.001;
+        angle += 0.006;
         let model = glm::translation(&glm::vec3(0.0, 0.0, 5.0)) * 
             glm::rotation(angle, &glm::vec3(0.0, 1.0, 0.0));
+        let mvp = camera.projection * camera.view * model;
         let mut render_context = RenderContext::new(
             &mut texture_buffer, 
-            &camera,
-            &model
+            |v: &mut Vertex| {
+                let p = v.position;
+                let result = mvp * glm::vec4(p.x, p.y, p.z, 1.0);
+                result / result.w
+            }
         );
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
 
