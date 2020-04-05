@@ -85,23 +85,13 @@ struct Vertex {
     position: glm::Vec3
 }
 
-impl HasPosition for Vertex {
-    fn position(&self) -> &glm::Vec3 {
-        &self.position
-    }
-}
-
-trait HasPosition {
-    fn position(&self) -> &glm::Vec3;
-}
-
-struct RenderContext<'a, V: Clone + HasPosition, VS: Fn(&mut V) -> glm::Vec4> {        
+struct RenderContext<'a, V: Clone, VS: Fn(&mut V) -> glm::Vec4> {        
     draw_buffer: &'a mut TextureBuffer,
     vertex_shader: VS,
     phantom: PhantomData<V>
 }
 
-impl<'a, V: Clone + HasPosition, VS: Fn(&mut V) -> glm::Vec4> RenderContext<'a, V, VS> {
+impl<'a, V: Clone, VS: Fn(&mut V) -> glm::Vec4> RenderContext<'a, V, VS> {
     fn new(draw_buffer: &'a mut TextureBuffer, vertex_shader: VS) -> Self {
         RenderContext {
             draw_buffer: draw_buffer,
