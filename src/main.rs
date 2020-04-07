@@ -109,10 +109,21 @@ impl<'a, V: Clone, VS: Fn(&mut V) -> glm::Vec4> RenderContext<'a, V, VS> {
         let mut current_indices = indices;
         loop {
             if let [i1, i2, i3, rest @ ..] = current_indices {
-                let v1 = self.transform_to_window_coordinates(&positions[*i1].xyz());
-                let v2 = self.transform_to_window_coordinates(&positions[*i2].xyz());
-                let v3 = self.transform_to_window_coordinates(&positions[*i3].xyz());
-                self.draw_triangle(&v1, &v2, &v3);
+                let mut p1 = positions[*i1];
+                let mut p2 = positions[*i2];
+                let mut p3 = positions[*i3];
+                let v1 = &vertices[*i1];
+                let v2 = &vertices[*i2];
+                let v3 = &vertices[*i3];
+                p1 /= p1.w;
+                p2 /= p2.w;
+                p3 /= p3.w;
+                self.draw_triangle(
+                    &self.transform_to_window_coordinates(&p1.xyz()), 
+                    &self.transform_to_window_coordinates(&p2.xyz()), 
+                    &self.transform_to_window_coordinates(&p3.xyz()), 
+                    v1, v2, v3
+                );
                 current_indices = rest;
             } else {
                 break;
@@ -120,48 +131,50 @@ impl<'a, V: Clone, VS: Fn(&mut V) -> glm::Vec4> RenderContext<'a, V, VS> {
         }
     }
     
-    fn draw_triangle(&mut self, v1: &glm::Vec3, v2: &glm::Vec3, v3: &glm::Vec3) {
-        let mut v1 = v1;
-        let mut v2 = v2;
-        let mut v3 = v3;
+    fn draw_triangle(&mut self, 
+        p1: &glm::Vec3, p2: &glm::Vec3, p3: &glm::Vec3,
+        _v1: &V, _v2: &V, _v3: &V) {
+        let mut p1 = p1;
+        let mut p2 = p2;
+        let mut p3 = p3;
 
-        if v2.y < v1.y {
-            std::mem::swap(&mut v1, &mut v2);
+        if p2.y < p1.y {
+            std::mem::swap(&mut p1, &mut p2);
         }
-        if v3.y < v2.y {
-            std::mem::swap(&mut v2, &mut v3);
+        if p3.y < p2.y {
+            std::mem::swap(&mut p2, &mut p3);
         }
-        if v2.y < v1.y {
-            std::mem::swap(&mut v1, &mut v2);
+        if p2.y < p1.y {
+            std::mem::swap(&mut p1, &mut p2);
         }
 
         //natural flat top
-        if v1.y == v2.y { 
-            if v2.x < v1.x {
-                std::mem::swap(&mut v1, &mut v2);
+        if p1.y == p2.y { 
+            if p2.x < p1.x {
+                std::mem::swap(&mut p1, &mut p2);
             }
-            self.draw_flat_top_triangle(v1, v2, v3);
+            self.draw_flat_top_triangle(p1, p2, p3);
         }
         //natural flat bottom
-        else if v2.y == v3.y {
-            if v3.x < v2.x {
-                std::mem::swap(&mut v2, &mut v3);
+        else if p2.y == p3.y {
+            if p3.x < p2.x {
+                std::mem::swap(&mut p2, &mut p3);
             }
-            self.draw_flat_bottom_triangle(v1, v2, v3);
+            self.draw_flat_bottom_triangle(p1, p2, p3);
         }
         //general triangle
         else {
-            let alpha = (v2.y - v1.y) / (v3.y - v1.y);
-            let vi = v1 + (v3 - v1) * alpha;
+            let alpha = (p2.y - p1.y) / (p3.y - p1.y);
+            let pi = p1 + (p3 - p1) * alpha;
             //major right
-            if v2.x < vi.x {
-                self.draw_flat_bottom_triangle(v1, v2, &vi);
-                self.draw_flat_top_triangle(v2, &vi, v3);
+            if p2.x < pi.x {
+                self.draw_flat_bottom_triangle(p1, p2, &pi);
+                self.draw_flat_top_triangle(p2, &pi, p3);
             }
             //major left
             else {
-                self.draw_flat_bottom_triangle(v1, &vi, v2);
-                self.draw_flat_top_triangle(&vi, v2, v3);
+                self.draw_flat_bottom_triangle(p1, &pi, p2);
+                self.draw_flat_top_triangle(&pi, p2, p3);
             }
         }
     }
@@ -304,8 +317,7 @@ pub fn main() {
             &mut texture_buffer, 
             |v: &mut Vertex| {
                 let p = v.position;
-                let result = mvp * glm::vec4(p.x, p.y, p.z, 1.0);
-                result / result.w
+                mvp * glm::vec4(p.x, p.y, p.z, 1.0)
             }
         );
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
