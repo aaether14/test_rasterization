@@ -154,9 +154,9 @@ impl<'a, V: Clone,
                     continue;
                 }
                 self.draw_triangle(
-                    &self.transform_to_window_coordinates(&p1.xyz()), 
-                    &self.transform_to_window_coordinates(&p2.xyz()), 
-                    &self.transform_to_window_coordinates(&p3.xyz()), 
+                    &self.transform_to_window_coordinates(&p1), 
+                    &self.transform_to_window_coordinates(&p2), 
+                    &self.transform_to_window_coordinates(&p3), 
                     v1, v2, v3
                 );
             } else {
@@ -166,7 +166,7 @@ impl<'a, V: Clone,
     }
     
     fn draw_triangle(&mut self, 
-        p1: &glm::Vec3, p2: &glm::Vec3, p3: &glm::Vec3,
+        p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4,
         v1: &V, v2: &V, v3: &V) {
         let mut p1 = p1;
         let mut p2 = p2;
@@ -214,7 +214,7 @@ impl<'a, V: Clone,
     }
 
     fn draw_flat_top_triangle(&mut self, 
-        p1: &glm::Vec3, p2: &glm::Vec3, p3: &glm::Vec3,
+        p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4,
         v1: &V, v2: &V, v3: &V) {
         let snap = |c: f32| {
             (c - 0.5).ceil()
@@ -227,15 +227,15 @@ impl<'a, V: Clone,
         let y_end = snap(p3.y).min(self.draw_buffer.size.1 as f32) as i32;
         
         for y in y_start..y_end {
-            let x_start = snap(slope1 * snap(y as f32 - p1.y) + p1.x).max(0.0).
-                min(self.draw_buffer.size.0 as f32) as i32;
-            let x_end = snap(slope2 * snap(y as f32 - p2.y) + p2.x) as i32;
+            let px1 = slope1 * (y as f32 + 0.5 - p1.y) + p1.x;
+            let px2 = slope2 * (y as f32 + 0.5 - p2.y) + p2.x;
+
+            let x_start = snap(px1).max(0.0) as i32;
+            let x_end = snap(px2).min(self.draw_buffer.size.0 as f32) as i32;
+
             for x in x_start..x_end {
                 let f = Self::barycentric_coordinates(
-                    &glm::vec2(x as f32, y as f32), 
-                    &p1.xy(),
-                    &p2.xy(),
-                    &p3.xy()
+                    &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p1, &p2, &p3
                 );
                 let color = (self.pixel_shader)(v1, v2, v3, f);
                 self.draw_buffer.set((x as u32, y as u32), &color);
@@ -244,7 +244,7 @@ impl<'a, V: Clone,
     }
 
     fn draw_flat_bottom_triangle(&mut self, 
-        p1: &glm::Vec3, p2: &glm::Vec3, p3: &glm::Vec3,
+        p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4,
         v1: &V, v2: &V, v3: &V) {
         let snap = |c: f32| {
             (c - 0.5).ceil()
@@ -257,15 +257,15 @@ impl<'a, V: Clone,
         let y_end = snap(p3.y).min(self.draw_buffer.size.1 as f32) as i32;
         
         for y in y_start..y_end {
-            let x_start = snap(slope1 * snap(y as f32 - p1.y) + p1.x).max(0.0) as i32;
-            let x_end = snap(slope2 * snap(y as f32 - p1.y) + p1.x).
-                min(self.draw_buffer.size.0 as f32) as i32;
+            let px1 = slope1 * (y as f32 + 0.5 - p1.y) + p1.x;
+            let px2 = slope2 * (y as f32 + 0.5 - p1.y) + p1.x;
+
+            let x_start = snap(px1).max(0.0) as i32;
+            let x_end = snap(px2).min(self.draw_buffer.size.0 as f32) as i32;
+
             for x in x_start..x_end {
                 let f = Self::barycentric_coordinates(
-                    &glm::vec2(x as f32, y as f32), 
-                    &p1.xy(),
-                    &p2.xy(),
-                    &p3.xy()
+                    &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p1, &p2, &p3
                 );
                 let color = (self.pixel_shader)(v1, v2, v3, f);
                 self.draw_buffer.set((x as u32, y as u32), &color);
@@ -273,21 +273,23 @@ impl<'a, V: Clone,
         }
     }
 
-    fn barycentric_coordinates(p: &glm::Vec2, p1: &glm::Vec2, p2: &glm::Vec2, p3: &glm::Vec2) -> (f32, f32, f32) {
-        let a1 = glm::cross2d(&(p2 - p1), &(p3 - p1));
-        let a2 = glm::cross2d(&(p1 - p), &(p2 - p));
-        let a3 = glm::cross2d(&(p1 - p), &(p3 - p));
-        let f1 = a2 / a1;
-        let f2 = a3 / a1;
-        let f3 = 1.0 - f1 - f2;
-        (f1, f2, f3)
+    fn barycentric_coordinates(p: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4) -> (f32, f32, f32) {
+        //let a1 = glm::cross2d(&(p2 - p1), &(p3 - p1));
+        //let a2 = glm::cross2d(&(p1 - p), &(p2 - p));
+        //let a3 = glm::cross2d(&(p1 - p), &(p3 - p));
+        //let f1 = a2 / a1;
+        //let f2 = a3 / a1;
+        //let f3 = 1.0 - f1 - f2;
+        //(f1, f2, f3)
+        (0.0, 0.0, 0.0)
     }
 
-    fn transform_to_window_coordinates(&self, v: &glm::Vec3) -> glm::Vec3 {
-        glm::vec3(
+    fn transform_to_window_coordinates(&self, v: &glm::Vec4) -> glm::Vec4 {
+        glm::vec4(
             (v.x + 1.0) * (self.draw_buffer.size.0 as f32 / 2.0),
             (v.y + 1.0) * (self.draw_buffer.size.1 as f32 / 2.0),
-            v.z
+            v.z,
+            v.w
         )
     }
 
@@ -354,7 +356,7 @@ pub fn main() {
         8,  9,  10, 8,  10, 11, 
         12, 14, 13, 12, 15, 14, 
         16, 17, 18, 16, 18, 19, 
-        20, 21, 22, 20, 22, 23 as usize 
+        20, 22, 21, 20, 23, 22 
     ];
 
     let mut fps_counter = FpsCounter::new();
