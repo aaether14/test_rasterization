@@ -138,6 +138,7 @@ impl<'a, V: Clone,
         let mut current_indices = indices;
         loop {
             if let [i1, i2, i3, rest @ ..] = current_indices {
+                current_indices = rest;
                 let mut p1 = positions[*i1];
                 let mut p2 = positions[*i2];
                 let mut p3 = positions[*i3];
@@ -147,13 +148,17 @@ impl<'a, V: Clone,
                 p1 /= p1.w;
                 p2 /= p2.w;
                 p3 /= p3.w;
+                let d1 = p3 - p1;
+                let d2 = p3 - p2;
+                if (d1.x * d2.y) - (d1.y * d2.x) < 0.0 {
+                    continue;
+                }
                 self.draw_triangle(
                     &self.transform_to_window_coordinates(&p1.xyz()), 
                     &self.transform_to_window_coordinates(&p2.xyz()), 
                     &self.transform_to_window_coordinates(&p3.xyz()), 
                     v1, v2, v3
                 );
-                current_indices = rest;
             } else {
                 break;
             }
@@ -344,10 +349,10 @@ pub fn main() {
     ];
 
     let cube_indices = [
-        0,  1,  2,  0,  2,  3,
+        0,  2,  1,  0,  3,  2,
         4,  5,  6,  4,  6,  7,
         8,  9,  10, 8,  10, 11, 
-        12, 13, 14, 12, 14, 15, 
+        12, 14, 13, 12, 15, 14, 
         16, 17, 18, 16, 18, 19, 
         20, 21, 22, 20, 22, 23 as usize 
     ];
@@ -379,7 +384,7 @@ pub fn main() {
             },
             |v1: &Vertex, v2: &Vertex, v3: &Vertex, f: (f32, f32, f32)| {
                 let v = *v1 * f.0 + *v2 * f.1 + *v3 * f.2;
-                [(v.uv.x * 255.0) as u8, (v.uv.y * 255.0) as u8, 0, 255]
+                [255, 255, 255, 255]
             }
         );
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
