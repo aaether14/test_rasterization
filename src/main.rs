@@ -2,6 +2,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::marker::PhantomData;
 use std::ops::Add;
+use std::ops::Sub;
 use std::ops::Mul;
 
 extern crate nalgebra_glm as glm;
@@ -82,7 +83,7 @@ impl Camera {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Vertex {
     position: glm::Vec3,
     uv: glm::Vec2
@@ -98,6 +99,16 @@ impl Add<Vertex> for Vertex {
     }
 }
 
+impl Sub<Vertex> for Vertex {
+    type Output = Vertex;
+    fn sub(self, rhs: Vertex) -> Self::Output {
+        Vertex {
+            position: self.position - rhs.position,
+            uv: self.uv - rhs.uv
+        }
+    }
+}
+
 impl Mul<f32> for Vertex {
     type Output = Vertex;
     fn mul(self, rhs: f32) -> Self::Output {
@@ -108,21 +119,27 @@ impl Mul<f32> for Vertex {
     } 
 }
 
-struct RenderContext<'a, V: Clone, 
+trait Linear: Copy + Add<Self, Output=Self> + Sub<Self, Output=Self> + Mul<f32, Output=Self> {}
+
+impl Linear for Vertex {}
+
+struct RenderContext<'a, V: Clone + Linear, 
     VS: Fn(&mut V) -> glm::Vec4, 
-    PS: Fn(&V, &V, &V, (f32, f32, f32)) -> [u8; 4]> {        
-    draw_buffer: &'a mut TextureBuffer,
+    PS: Fn(&V, &V, &V, (f32, f32, f32)) -> [u8; 4]> {   
+    cull_backface: bool,     
+    target: &'a mut TextureBuffer,
     vertex_shader: VS,
     pixel_shader: PS,
     phantom: PhantomData<V>
 }
 
-impl<'a, V: Clone, 
+impl<'a, V: Clone + Linear, 
     VS: Fn(&mut V) -> glm::Vec4, 
     PS: Fn(&V, &V, &V, (f32, f32, f32)) -> [u8; 4]> RenderContext<'a, V, VS, PS> {
-    fn new(draw_buffer: &'a mut TextureBuffer, vertex_shader: VS, pixel_shader: PS) -> Self {
+    fn new(cull_backface: bool, target: &'a mut TextureBuffer, vertex_shader: VS, pixel_shader: PS) -> Self {
         RenderContext {
-            draw_buffer: draw_buffer,
+            cull_backface,
+            target,
             vertex_shader,
             pixel_shader,
             phantom: PhantomData
@@ -137,27 +154,29 @@ impl<'a, V: Clone,
             collect::<Vec<_>>();
         let mut current_indices = indices;
         loop {
-            if let [i1, i2, i3, rest @ ..] = current_indices {
+            if let [i0, i1, i2, rest @ ..] = current_indices {
                 current_indices = rest;
+                let mut p0 = positions[*i0];
                 let mut p1 = positions[*i1];
                 let mut p2 = positions[*i2];
-                let mut p3 = positions[*i3];
+                let v0 = &vertices[*i0];
                 let v1 = &vertices[*i1];
                 let v2 = &vertices[*i2];
-                let v3 = &vertices[*i3];
+                p0 /= p0.w;
                 p1 /= p1.w;
                 p2 /= p2.w;
-                p3 /= p3.w;
-                let d1 = p3 - p1;
-                let d2 = p3 - p2;
-                if (d1.x * d2.y) - (d1.y * d2.x) < 0.0 {
-                    continue;
+                if self.cull_backface {
+                    let d1 = p2 - p0;
+                    let d2 = p2 - p1;
+                    if (d1.x * d2.y) - (d1.y * d2.x) < 0.0 {
+                        continue;
+                    }
                 }
                 self.draw_triangle(
+                    &self.transform_to_window_coordinates(&p0), 
                     &self.transform_to_window_coordinates(&p1), 
                     &self.transform_to_window_coordinates(&p2), 
-                    &self.transform_to_window_coordinates(&p3), 
-                    v1, v2, v3
+                    v0, v1, v2
                 );
             } else {
                 break;
@@ -166,49 +185,58 @@ impl<'a, V: Clone,
     }
     
     fn draw_triangle(&mut self, 
-        p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4,
-        v1: &V, v2: &V, v3: &V) {
+        p0: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4,
+        v0: &V, v1: &V, v2: &V) {
+        let mut p0 = p0;
         let mut p1 = p1;
         let mut p2 = p2;
-        let mut p3 = p3;
+        let mut v0 = v0;
+        let mut v1 = v1;
+        let mut v2 = v2;
 
-        if p2.y < p1.y {
-            std::mem::swap(&mut p1, &mut p2);
-        }
-        if p3.y < p2.y {
-            std::mem::swap(&mut p2, &mut p3);
+        if p1.y < p0.y {
+            std::mem::swap(&mut p0, &mut p1);
+            std::mem::swap(&mut v0, &mut v1);
         }
         if p2.y < p1.y {
             std::mem::swap(&mut p1, &mut p2);
+            std::mem::swap(&mut v1, &mut v2);
+        }
+        if p1.y < p0.y {
+            std::mem::swap(&mut p0, &mut p1);
+            std::mem::swap(&mut v0, &mut v1);
         }
 
         //natural flat top
-        if p1.y == p2.y { 
-            if p2.x < p1.x {
-                std::mem::swap(&mut p1, &mut p2);
+        if p0.y == p1.y { 
+            if p1.x < p0.x {
+                std::mem::swap(&mut p0, &mut p1);
+                std::mem::swap(&mut v0, &mut v1);
             }
-            self.draw_flat_top_triangle(p1, p2, p3, v1, v2, v3);
+            self.draw_flat_top_triangle(p0, p1, p2, v0, v1, v2);
         }
         //natural flat bottom
-        else if p2.y == p3.y {
-            if p3.x < p2.x {
-                std::mem::swap(&mut p2, &mut p3);
+        else if p1.y == p2.y {
+            if p2.x < p1.x {
+                std::mem::swap(&mut p1, &mut p2);
+                std::mem::swap(&mut v1, &mut v2);
             }
-            self.draw_flat_bottom_triangle(p1, p2, p3, v1, v2, v3);
+            self.draw_flat_bottom_triangle(p0, p1, p2, v0, v1, v2);
         }
         //general triangle
         else {
-            let alpha = (p2.y - p1.y) / (p3.y - p1.y);
-            let pi = p1 + (p3 - p1) * alpha;
+            let alpha = (p1.y - p0.y) / (p2.y - p0.y);
+            let pi = p0 + (p2 - p0) * alpha;
+            let vi = *v0 + (*v2 - *v0) * alpha;
             //major right
-            if p2.x < pi.x {
-                self.draw_flat_bottom_triangle(p1, p2, &pi, v1, v2, v3);
-                self.draw_flat_top_triangle(p2, &pi, p3, v1, v2, v3);
+            if p1.x < pi.x {
+                self.draw_flat_bottom_triangle(p0, p1, &pi, v0, v1, &vi);
+                self.draw_flat_top_triangle(p1, &pi, p2, v1, &vi, v2);
             }
             //major left
             else {
-                self.draw_flat_bottom_triangle(p1, &pi, p2, v1, v2, v3);
-                self.draw_flat_top_triangle(&pi, p2, p3, v1, v2, v3);
+                self.draw_flat_bottom_triangle(p0, &pi, p1, v0, &vi, v1);
+                self.draw_flat_top_triangle(&pi, p1, p2, &vi, v1, v2);
             }
         }
     }
@@ -224,21 +252,21 @@ impl<'a, V: Clone,
         let slope2 = (p3.x - p2.x) / (p3.y - p2.y);
 
         let y_start = snap(p1.y).max(0.0) as i32;
-        let y_end = snap(p3.y).min(self.draw_buffer.size.1 as f32) as i32;
+        let y_end = snap(p3.y).min(self.target.size.1 as f32) as i32;
         
         for y in y_start..y_end {
             let px1 = slope1 * (y as f32 + 0.5 - p1.y) + p1.x;
             let px2 = slope2 * (y as f32 + 0.5 - p2.y) + p2.x;
 
             let x_start = snap(px1).max(0.0) as i32;
-            let x_end = snap(px2).min(self.draw_buffer.size.0 as f32) as i32;
+            let x_end = snap(px2).min(self.target.size.0 as f32) as i32;
 
             for x in x_start..x_end {
                 let f = Self::barycentric_coordinates(
                     &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p1, &p2, &p3
                 );
                 let color = (self.pixel_shader)(v1, v2, v3, f);
-                self.draw_buffer.set((x as u32, y as u32), &color);
+                self.target.set((x as u32, y as u32), &color);
             }
         }
     }
@@ -254,40 +282,45 @@ impl<'a, V: Clone,
         let slope2 = (p3.x - p1.x) / (p3.y - p1.y);
         
         let y_start = snap(p1.y).max(0.0) as i32;
-        let y_end = snap(p3.y).min(self.draw_buffer.size.1 as f32) as i32;
+        let y_end = snap(p3.y).min(self.target.size.1 as f32) as i32;
         
         for y in y_start..y_end {
             let px1 = slope1 * (y as f32 + 0.5 - p1.y) + p1.x;
             let px2 = slope2 * (y as f32 + 0.5 - p1.y) + p1.x;
 
             let x_start = snap(px1).max(0.0) as i32;
-            let x_end = snap(px2).min(self.draw_buffer.size.0 as f32) as i32;
+            let x_end = snap(px2).min(self.target.size.0 as f32) as i32;
 
             for x in x_start..x_end {
                 let f = Self::barycentric_coordinates(
                     &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p1, &p2, &p3
                 );
                 let color = (self.pixel_shader)(v1, v2, v3, f);
-                self.draw_buffer.set((x as u32, y as u32), &color);
+                self.target.set((x as u32, y as u32), &color);
             }
         }
     }
 
     fn barycentric_coordinates(p: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4) -> (f32, f32, f32) {
-        //let a1 = glm::cross2d(&(p2 - p1), &(p3 - p1));
-        //let a2 = glm::cross2d(&(p1 - p), &(p2 - p));
-        //let a3 = glm::cross2d(&(p1 - p), &(p3 - p));
-        //let f1 = a2 / a1;
-        //let f2 = a3 / a1;
-        //let f3 = 1.0 - f1 - f2;
-        //(f1, f2, f3)
-        (0.0, 0.0, 0.0)
+        let v1 = (p2 - p1).xy();
+        let v2 = (p3 - p1).xy();
+        let v3 = (p - p1).xy();
+        let d00 = glm::dot(&v1, &v1);
+        let d01 = glm::dot(&v1, &v2);
+        let d11 = glm::dot(&v2, &v2);
+        let d20 = glm::dot(&v3, &v1);
+        let d21 = glm::dot(&v3, &v2);
+        let denom = d00 * d11 - d01 * d01;
+        let f1 = (d11 * d20 - d01 * d21) / denom;
+        let f2 = (d00 * d21 - d01 * d20) / denom;
+        let f3 = 1.0 - f1 - f2;
+        (f1, f2, f3)
     }
 
     fn transform_to_window_coordinates(&self, v: &glm::Vec4) -> glm::Vec4 {
         glm::vec4(
-            (v.x + 1.0) * (self.draw_buffer.size.0 as f32 / 2.0),
-            (v.y + 1.0) * (self.draw_buffer.size.1 as f32 / 2.0),
+            (v.x + 1.0) * (self.target.size.0 as f32 / 2.0),
+            (v.y + 1.0) * (self.target.size.1 as f32 / 2.0),
             v.z,
             v.w
         )
@@ -379,6 +412,7 @@ pub fn main() {
             glm::rotation(angle, &glm::vec3(0.0, 1.0, 0.0));
         let mvp = camera.projection * camera.view * model;
         let mut render_context = RenderContext::new(
+            true,
             &mut texture_buffer, 
             |v: &mut Vertex| {
                 let p = v.position;
@@ -386,7 +420,7 @@ pub fn main() {
             },
             |v1: &Vertex, v2: &Vertex, v3: &Vertex, f: (f32, f32, f32)| {
                 let v = *v1 * f.0 + *v2 * f.1 + *v3 * f.2;
-                [255, 255, 255, 255]
+                [(v.uv.x * 255.0) as u8, (v.uv.y * 255.0) as u8, 255, 255]
             }
         );
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
