@@ -166,16 +166,16 @@ impl<'a, V: Clone + Linear,
                 p1 /= p1.w;
                 p2 /= p2.w;
                 if self.cull_backface {
-                    let d1 = p2 - p0;
-                    let d2 = p2 - p1;
-                    if (d1.x * d2.y) - (d1.y * d2.x) < 0.0 {
+                    let d0 = p2 - p0;
+                    let d1 = p2 - p1;
+                    if (d0.x * d1.y) - (d0.y * d1.x) < 0.0 {
                         continue;
                     }
                 }
                 self.draw_triangle(
-                    &self.transform_to_window_coordinates(&p0), 
-                    &self.transform_to_window_coordinates(&p1), 
-                    &self.transform_to_window_coordinates(&p2), 
+                    &self.transform_to_target_coordinates(&p0), 
+                    &self.transform_to_target_coordinates(&p1), 
+                    &self.transform_to_target_coordinates(&p2), 
                     v0, v1, v2
                 );
             } else {
@@ -242,60 +242,51 @@ impl<'a, V: Clone + Linear,
     }
 
     fn draw_flat_top_triangle(&mut self, 
-        p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4,
-        v1: &V, v2: &V, v3: &V) {
-        let snap = |c: f32| {
-            (c - 0.5).ceil()
-        };
+        p0: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4,
+        v0: &V, v1: &V, v2: &V) {
 
-        let slope1 = (p3.x - p1.x) / (p3.y - p1.y);
-        let slope2 = (p3.x - p2.x) / (p3.y - p2.y);
+        let slope1 = (p2.x - p0.x) / (p2.y - p0.y);
+        let slope2 = (p2.x - p1.x) / (p2.y - p1.y);
 
-        let y_start = snap(p1.y).max(0.0) as i32;
-        let y_end = snap(p3.y).min(self.target.size.1 as f32) as i32;
-        
-        for y in y_start..y_end {
-            let px1 = slope1 * (y as f32 + 0.5 - p1.y) + p1.x;
-            let px2 = slope2 * (y as f32 + 0.5 - p2.y) + p2.x;
-
-            let x_start = snap(px1).max(0.0) as i32;
-            let x_end = snap(px2).min(self.target.size.0 as f32) as i32;
-
-            for x in x_start..x_end {
-                let f = Self::barycentric_coordinates(
-                    &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p1, &p2, &p3
-                );
-                let color = (self.pixel_shader)(v1, v2, v3, f);
-                self.target.set((x as u32, y as u32), &color);
-            }
-        }
+        self.draw_flat_triangle_common(p0, p1, p2, [(slope1, p0), (slope2, p1)], v0, v1, v2);
     }
 
     fn draw_flat_bottom_triangle(&mut self, 
-        p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4,
-        v1: &V, v2: &V, v3: &V) {
+        p0: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4,
+        v0: &V, v1: &V, v2: &V) {
+
+        let slope1 = (p1.x - p0.x) / (p1.y - p0.y);
+        let slope2 = (p2.x - p0.x) / (p2.y - p0.y);
+
+        self.draw_flat_triangle_common(p0, p1, p2, [(slope1, p0), (slope2, p0)], v0, v1, v2);
+    }
+
+    fn draw_flat_triangle_common(&mut self, 
+        p0: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4, lines: [(f32, &glm::Vec4); 2],
+        v0: &V, v1: &V, v2: &V) {
+    
+        let [(slope0, line_start0), 
+            (slope1, line_start1)] = lines;
+            
         let snap = |c: f32| {
             (c - 0.5).ceil()
         };
 
-        let slope1 = (p2.x - p1.x) / (p2.y - p1.y);
-        let slope2 = (p3.x - p1.x) / (p3.y - p1.y);
-        
-        let y_start = snap(p1.y).max(0.0) as i32;
-        let y_end = snap(p3.y).min(self.target.size.1 as f32) as i32;
-        
+        let y_start = snap(p0.y).max(0.0) as i32;
+        let y_end = snap(p2.y).min(self.target.size.1 as f32) as i32;
+            
         for y in y_start..y_end {
-            let px1 = slope1 * (y as f32 + 0.5 - p1.y) + p1.x;
-            let px2 = slope2 * (y as f32 + 0.5 - p1.y) + p1.x;
+            let px0 = slope0 * (y as f32 + 0.5 - line_start0.y) + line_start0.x;
+            let px1 = slope1 * (y as f32 + 0.5 - line_start1.y) + line_start1.x;
 
-            let x_start = snap(px1).max(0.0) as i32;
-            let x_end = snap(px2).min(self.target.size.0 as f32) as i32;
+            let x_start = snap(px0).max(0.0) as i32;
+            let x_end = snap(px1).min(self.target.size.0 as f32) as i32;
 
             for x in x_start..x_end {
                 let f = Self::barycentric_coordinates(
-                    &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p1, &p2, &p3
+                    &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p0, &p1, &p2
                 );
-                let color = (self.pixel_shader)(v1, v2, v3, f);
+                let color = (self.pixel_shader)(v0, v1, v2, f);
                 self.target.set((x as u32, y as u32), &color);
             }
         }
@@ -317,7 +308,7 @@ impl<'a, V: Clone + Linear,
         (f0, f1, f2)
     }
 
-    fn transform_to_window_coordinates(&self, v: &glm::Vec4) -> glm::Vec4 {
+    fn transform_to_target_coordinates(&self, v: &glm::Vec4) -> glm::Vec4 {
         glm::vec4(
             (v.x + 1.0) * (self.target.size.0 as f32 / 2.0),
             (v.y + 1.0) * (self.target.size.1 as f32 / 2.0),
@@ -407,7 +398,7 @@ pub fn main() {
 
         texture_buffer.clear(0);
 
-        angle += 0.006;
+        angle += 0.01;
         let model = glm::translation(&glm::vec3(0.0, 0.0, 5.0)) * 
             glm::rotation(angle, &glm::vec3(0.0, 1.0, 0.0));
         let mvp = camera.projection * camera.view * model;
@@ -420,7 +411,7 @@ pub fn main() {
             },
             |v1: &Vertex, v2: &Vertex, v3: &Vertex, f: (f32, f32, f32)| {
                 let v = *v1 * f.0 + *v2 * f.1 + *v3 * f.2;
-                [(v.uv.x * 255.0) as u8, (v.uv.y * 255.0) as u8, 255, 255]
+                [0, (v.uv.y * 255.0) as u8, (v.uv.x * 255.0) as u8, 255]
             }
         );
         render_context.draw_indexed_triangles(&cube_indices, &cube_vertices);
