@@ -301,20 +301,20 @@ impl<'a, V: Clone + Linear,
         }
     }
 
-    fn barycentric_coordinates(p: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4, p3: &glm::Vec4) -> (f32, f32, f32) {
-        let v1 = (p2 - p1).xy();
-        let v2 = (p3 - p1).xy();
-        let v3 = (p - p1).xy();
-        let d00 = glm::dot(&v1, &v1);
-        let d01 = glm::dot(&v1, &v2);
-        let d11 = glm::dot(&v2, &v2);
-        let d20 = glm::dot(&v3, &v1);
-        let d21 = glm::dot(&v3, &v2);
+    fn barycentric_coordinates(p: &glm::Vec4, p0: &glm::Vec4, p1: &glm::Vec4, p2: &glm::Vec4) -> (f32, f32, f32) {
+        let v0 = p1 - p0;
+        let v1 = p2 - p0; 
+        let v2 = p - p0;
+        let d00 = glm::dot(&v0.xy(), &v0.xy());
+        let d01 = glm::dot(&v0.xy(), &v1.xy());
+        let d11 = glm::dot(&v1.xy(), &v1.xy());
+        let d20 = glm::dot(&v2.xy(), &v0.xy());
+        let d21 = glm::dot(&v2.xy(), &v1.xy());
         let denom = d00 * d11 - d01 * d01;
         let f1 = (d11 * d20 - d01 * d21) / denom;
         let f2 = (d00 * d21 - d01 * d20) / denom;
-        let f3 = 1.0 - f1 - f2;
-        (f1, f2, f3)
+        let f0 = 1.0 - f1 - f2;
+        (f0, f1, f2)
     }
 
     fn transform_to_window_coordinates(&self, v: &glm::Vec4) -> glm::Vec4 {
