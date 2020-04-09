@@ -125,7 +125,7 @@ impl Linear for Vertex {}
 
 struct RenderContext<'a, V: Clone + Linear, 
     VS: Fn(&mut V) -> glm::Vec4, 
-    PS: Fn(&V, &V, &V, (f32, f32, f32)) -> [u8; 4]> {   
+    PS: Fn(&V) -> [u8; 4]> {   
     cull_backface: bool,     
     target: &'a mut TextureBuffer,
     vertex_shader: VS,
@@ -135,7 +135,7 @@ struct RenderContext<'a, V: Clone + Linear,
 
 impl<'a, V: Clone + Linear, 
     VS: Fn(&mut V) -> glm::Vec4, 
-    PS: Fn(&V, &V, &V, (f32, f32, f32)) -> [u8; 4]> RenderContext<'a, V, VS, PS> {
+    PS: Fn(&V) -> [u8; 4]> RenderContext<'a, V, VS, PS> {
     fn new(cull_backface: bool, target: &'a mut TextureBuffer, vertex_shader: VS, pixel_shader: PS) -> Self {
         RenderContext {
             cull_backface,
@@ -286,7 +286,8 @@ impl<'a, V: Clone + Linear,
                 let f = Self::barycentric_coordinates(
                     &glm::vec4(x as f32, y as f32, 0.0, 0.0), &p0, &p1, &p2
                 );
-                let color = (self.pixel_shader)(v0, v1, v2, f);
+                let interpolated = *v0 * f.0 + *v1 * f.1 + *v2 * f.2;
+                let color = (self.pixel_shader)(&interpolated);
                 self.target.set((x as u32, y as u32), &color);
             }
         }
@@ -409,8 +410,7 @@ pub fn main() {
                 let p = v.position;
                 mvp * glm::vec4(p.x, p.y, p.z, 1.0)
             },
-            |v1: &Vertex, v2: &Vertex, v3: &Vertex, f: (f32, f32, f32)| {
-                let v = *v1 * f.0 + *v2 * f.1 + *v3 * f.2;
+            |v: &Vertex| {
                 [0, (v.uv.y * 255.0) as u8, (v.uv.x * 255.0) as u8, 255]
             }
         );
