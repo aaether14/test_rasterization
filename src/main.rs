@@ -154,14 +154,14 @@ impl<'a, V: Clone + Linear,
             collect::<Vec<_>>();
         let mut current_indices = indices;
         loop {
-            if let [i0, i1, i2, rest @ ..] = current_indices {
+            if let [i0, i1, i2, ref rest @ ..] = *current_indices {
                 current_indices = rest;
-                let mut p0 = positions[*i0];
-                let mut p1 = positions[*i1];
-                let mut p2 = positions[*i2];
-                let v0 = &vertices[*i0];
-                let v1 = &vertices[*i1];
-                let v2 = &vertices[*i2];
+                let mut p0 = positions[i0];
+                let mut p1 = positions[i1];
+                let mut p2 = positions[i2];
+                let v0 = &vertices[i0];
+                let v1 = &vertices[i1];
+                let v2 = &vertices[i2];
                 p0 /= p0.w;
                 p1 /= p1.w;
                 p2 /= p2.w;
